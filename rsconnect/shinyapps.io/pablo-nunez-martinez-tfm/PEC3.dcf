@@ -1,0 +1,14 @@
+name: PEC3
+title: PEC3
+username:
+account: pablo-nunez-martinez-tfm
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 9188450
+bundleId: 7264434
+url: https://pablo-nunez-martinez-tfm.shinyapps.io/PEC3/
+when: 1685050993.84197
+lastSyncTime: 1685050993.84197
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: APP_2.R|ckd-dataset-v2.csv|Esquema predicciones.png|M0_167_2_rrebrij0_comment19845900.pdf|PEC3.Rmd|requirements.txt|Trabajo de Fin de Máster PEC 3.docx

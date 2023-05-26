@@ -1,0 +1,5 @@
+# Lista de librerías requeridas con versiones específicas
+ggplot2==3.4.0
+caret==6.0-93
+shiny==1.7.4
+shinydashboard==0.7.2
