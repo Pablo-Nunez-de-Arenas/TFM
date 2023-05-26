@@ -1,0 +1,1191 @@
+---
+title: "Trabajo de Fin de Máster PEC 2: Desarrollo del trabajo. Fase 1."
+author: "Pablo Núñez de Arenas Martínez"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: true
+lang: es 
+---
+
+```{r libraries, include=FALSE}
+library(knitr)
+# Unificar niveles
+library(forcats)
+# Gráficas y representación
+library(ggplot2)
+library(gridExtra)
+# Paquetes para MCA
+library(FactoMineR)
+library(Factoshiny)
+library(factoextra)
+# Regresión lasso
+library(glmnet)
+library(fastDummies)
+# Anális de multidimensionalidad
+library(car)
+library(vcd)
+# Generación de muestras sintéticas
+library(ROSE)
+# traincontrol
+library(caret)
+# >%>
+library(dplyr)
+# Decision tree
+library(rpart)
+# Random forest
+library(randomForest)
+```
+
+```{r, chunk1, include=FALSE}
+file1 <- "ckd-dataset-v2.csv"
+
+# Leemos el archivo y borramos las filas vacias
+data <- read.csv("ckd-dataset-v2.csv")
+data <- data[-1:-2,]
+
+# Reordenamos "class"
+data <- cbind(data[5], data[-5])
+
+# Convertimos cada variable a factor y la volvemos a codificar si es necesario
+data <- lapply(data, factor)
+levels(data$sg) <- c(0, 1, 2, 3, 4)
+levels(data$al) <- c(0, 1, 2, 3, 4)
+levels(data$su) <- c(0, 1, 2, 3, 4, 5)
+levels(data$bgr) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+levels(data$bu) <- c(0, 3, 4, 5, 6, 1, 2, 7)
+levels(data$sod) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+levels(data$sc) <- c(0, 1, 2, 3, 4, 5, 6)
+levels(data$pot) <- c(0, 1, 2, 3)
+levels(data$hemo) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+levels(data$pcv) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+levels(data$rbcc) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+levels(data$wbcc) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+levels(data$grf) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+levels(data$stage) <- c(0, 1, 2, 3, 4, 5)
+levels(data$age) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+data <- as.data.frame(data)
+
+# Eliminar variables
+affected <- data$affected
+data <- data[-28]
+data <- data[-27]
+data <- data[-26]
+data <- data[-3]
+data <- data[-2]
+data <- cbind(affected, data[,2:24])
+```
+
+Tal y como comentamos en la anterior entrega la implementación de la mayoría de los modelos de aprendizaje automático requieren de:
+
+1.	Recopilar datos.
+
+2.	Explorar y preprocesar datos.
+
+3.	Construir y entrenar un modelo en los datos.
+
+4.	Evaluar el rendimiento del modelo.
+
+5.	Mejorar el rendimiento del modelo.
+
+6.	Evaluar el modelo mejorado.
+
+## Explorar y preprocesar datos.
+
+Esta sección contiene un breve resumen de las variables y una serie de gráficos que nos permiten ver la relación de algunas variables con la respuesta, después se aplicarán técnicas de reducción de dimensionalidad para reducir el número de variables y evitarnos problemas de multicolinealidad.
+
+### Exploración de la base de datos: 
+
+Recordemos que de las 29 variables iniciales en la entrega anterior acordamos eliminar las variables “affected”, “bp.limit”, “GRF” y “stage” finalmente se borrará la variable “class” en vez de “affected” ambas variables vienen a representar lo mismo, “class” hace referencia al número de pacientes que padecen o no CKD con dos variables de tipo carácter y la variable “affected” es la misma pero en forma binaria, lo cual nos puede ser más útil a la hora de probar algunos modelos que no admitan entradas de datos de tipo carácter.
+En este caso cuando affected sea igual a 0 significará que el paciente está sano y cuando affected sea igual a 1 significará que el paciente sufre de CKD.
+
+Resumen del `dataset`
+
+```{r, chunk2, echo=FALSE}
+summary(data)
+table(data$age)
+```
+
+Primero podemos observar como la variable respuesta esta descompensada, la desigualdad en la distribución de la variable respuesta puede afectar el rendimiento del modelo y la precisión de las predicciones. Solucionaremos este problema mediante el sobre-muestreo sintético de la clase mayoritaria.
+
+Por otro lado, podemos ver cómo hay varias variables con varios niveles donde las tablas de contingencia están sumamente desbalanceadas, como por ejemplo los niveles de albumina (al) o  los de azúcar (su). 
+
+### Tecnicás de reducción de multidimensionalidad
+
+#### Análisis de correspondencia múltiple (MCA)
+
+Primero aplicaremos una técnica de Análisis de Correspondencia Múltiple (MCA), una técnica de reducción de dimensionalidad que se utiliza para analizar la relación entre variables categóricas en un conjunto de datos. En este caso excluiremos la variable respuesta ya que lo que queremos es analizar la relación entre las variables predictoras.
+
+```{r, chunck3, echo=FALSE}
+# MCA
+res.mca <- MCA(data[-1], graph = FALSE)
+
+# Varianza explicada por dimension
+eig.val <- get_eigenvalue(res.mca)
+fviz_screeplot(res.mca, addlabels = TRUE, ylim = c(0, 15))
+```
+
+Vemos como Las 10 primeras dimensiones apenas abarcan un 35% de la variabilidad siendo necesario abarcar 31 dimensiones para llegar a explicar el 70% de la variabilidad.
+
+Proyección en las 2 primeras dimensiones.
+
+```{r, chunck4, echo=FALSE}
+fviz_mca_biplot(res.mca, 
+               repel = TRUE, # Avoid text overlapping (slow if many point)
+               ggtheme = theme_minimal())
+```
+
+Existe mucho solapamiento de variables que no parecen aportar mucha información. Destacar que esta representación tampoco es una representación muy fiable del peso de las variables ya que ambas dimensiones acumulan menos de un 13% de la variabilidad.
+
+Correlación entre las 2 primeras dimensiones y cada variable.
+
+```{r, chunck5, echo=FALSE}
+var <- get_mca_var(res.mca)
+
+fviz_mca_var(res.mca, choice = "mca.cor", 
+            repel = TRUE, # Avoid text overlapping (slow)
+            ggtheme = theme_minimal())
+
+# Eliminando las muestras
+# Color by cos2 values: quality on the factor map
+fviz_mca_var(res.mca, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE, # Avoid text overlapping
+             ggtheme = theme_minimal())
+
+# Cos2 of variable categories on Dim.1 and Dim.2
+fviz_cos2(res.mca, choice = "var", axes = 1:2)
+```
+
+Vemos como hemo (hemoglobin), pcv (packed cell volume) y rbcc (red blood cell volume) tienen bastante peso en la primera dimensión, conceptualmente las 3 variables deberían estar bastante emparentadas y causar problemas de colinealidad.
+
+En la segunda dimension pot (potasio), so (sodio), sc (serum creatine), y bu (blood urea), la variable pot ha de ser eliminada ya que representa muy poca variabilidad de los 200 pacientes 197 pertenecen al nivel 0 de la variable. No es conveniente mantener una variable tan sesgada.
+
+```{r, chunck6, echo=FALSE}
+# Eliminar variables
+summary(data$pot)
+```
+
+COntribución de cada variable a la primera y segunda dimensión
+
+```{r, chunck7, echo=FALSE}
+# Contributions of rows to dimension 1
+fviz_contrib(res.mca, choice = "var", axes = 1, top = 48)
+# Contributions of rows to dimension 2
+fviz_contrib(res.mca, choice = "var", axes = 2, top = 15)
+# Contribuciónes
+head(round(var$contrib,2), 10)
+```
+
+Respecto a la segunda dimensión todas las variables que destacan están muy descompensadas y son precisamente los niveles que destacan los que tienen una única muestra entre las 200 mediciones. Por tanto no son variables muy significativas.
+
+```{r, chunck8, echo=TRUE}
+# Bu_7 solo una muestra
+summary(data$bu)
+# Sod_8 solo una muestra
+summary(data$sod)
+# SC_6 solo una muestra
+summary(data$sc)
+# pot_1 solo una muestra
+summary(data$pot)
+# su_3 8 de 200 muestras
+summary(data$su)
+```
+
+Sobre la primera dimensión podemos destacar variables como la hipertensión (htn) cuyos dos niveles aparecen en segunda como séptima posición, ambos  niveles de pus cells (pc) aparecen en el top 40 al igual que la diabetes melitus (dm), la anemia o la falta de apetito..
+
+Sobre la albumina solo aparecen los niveles 0, 2 3 y 4 en el top 40 además de estar muy descompensada. Pedal anemia (pe) parece relevante aunque puede estar altamente relacionada con la anemia.
+
+blood urea está muy descompensada y solo aporta información en 1 de los 4 niveles. pcc (pus cell clumps) esta directamente relaciondada con pc.
+
+Eliminamos:
+
+- Sugar (su) y glucosa (bgr). Ambas variables tienen un peso mínimo en ambas dimensiones en todos sus niveles.
+
+- Albumina (al). solo aparecen los niveles 0, 2, 3 y 4 entre las variables con pesos significativos además está muy descompensada.
+
+```{r, chunck9, echo=TRUE}
+summary(data$al)
+```
+
+- Rbcc (red blood cell volume) y hemo (hemoglobine), están muy relacionadas con rbc, no todos sus niveles son representativos y tienen menos peso que rbc.
+
+- pcc (pus cell clums) y ba (bacteria) están directamente relacionadas con pc (pus cells) y aportan menos información.    
+
+- pot (potasium) de 200 muestras 197 pertenecen al nivel 0.
+
+- pcv (packed cell volume), wbcc (white blood cell counts), sg (specific gravity), bu (blood urea), sod (sodium) y age. pocos o ninguno de los niveles aparecen en el top 48 variables significativas.
+
+En resumen mantendrémos.
+
+- rbc (red blood cells)
+- pc (pus cells)
+- htn (hypertension)
+- cad (coronary artery disease)
+- dm (diabetes melitus)
+- pe (pedal anemia)
+- appet (apetito)
+- Ane (anemia)
+
+Puede que algunas variables entren en conflicto entre ellas como rbc, ane y pe o como htn y cad.
+
+Creamos un dataset con las variables.
+
+```{r, chunck10, echo=FALSE}
+selected_vars <- c("rbc", "pc", "htn", "dm", "cad", "appet", "ane")
+data_reduced <- data[, selected_vars]
+data_reduced <- cbind(affected, data_reduced)
+```
+
+Comprobamos la colinealidad con la función `assoc`.
+
+```{r, chunck11, echo=FALSE}
+asociaciones<-assoc(data_reduced)
+asociaciones
+table(data$affected)
+```
+
+Si atendemos a las tablas de contención vemos que de los 72 pacientes sanos ninguno de ellos sufre ninguno de los problemas descritos por las variables como hipertensión, diabetes, anemia etc. 
+
+Si un paciente sufre de falta de apetito, anemia, hipertensión etc. Para nuestro modelo va a significar que padece CKD lo cual es un error. Por tanto no podemos incluir ninguna de estas variables y debemos pensar en añadir alguna de las descartadas anteriormente.
+
+Por ejemplo si creamos el modelo con alguna sde estas variables, por ejemplo el apetito y la hipertensión.
+
+Recibimos el siguiente aviso: 
+
+```{r, chunck12, echo=FALSE}
+mod_ref <- glm(affected ~ appet + htn , data = data_reduced, family = binomial(link = "logit"))
+summary(mod_ref)
+```
+
+En particular, indica que las probabilidades ajustadas del modelo son muy cercanas a 0 o 1. Esto puede suceder si el modelo está sobreajustado a los datos o si hay variables predictoras altamente correlacionadas o redundantes. También puede suceder si hay valores atípicos extremos en los datos o si la distribución de los datos es muy desequilibrada. En mi opinión la base de datos parece sesgada, no es normal que toda la gente que muestra falta de apetito padezca de CKD por ejemplo.
+
+Si nos fijamos en los errores estandart estos son altísimos y las variables no resultan significativas.
+
+Si creamos el modelo con todas las variantes selecionadas vemos como "Pr(>|Z|)" es 1 o prácticamente 1 en todas las variables, lo que sugiere que ninguna de las variables predictoras está aportando información útil al modelo.
+
+```{r, chunck13, echo=FALSE}
+mod_ref <- glm(affected ~ ., data = data_reduced, family = binomial(link = "logit"))
+vif(mod_ref)
+summary(mod_ref)
+```
+
+Vemos como los errores estándart se disparan lo que indica que la estimación del cociente no es precisa. Según los valores obtenidos en VIF las variables no tienen problemas de multicolinealidad lo cual es extraño teniendo en cuenta que la hiperrtenisión y los problemas cardiacos pueden estar muy relacionados igual que la anemia y el numero de glóbulos rojos. 
+
+Una posible solución es crear una regresión lasso con glmnet.
+
+#### Regresión lasso
+
+La regresión lasso es una técnica que se usa tanto en regresiones lineales como logísticas o de Poisson que tiene la propiedad de seleccionar automáticamente las variables predictoras más importantes, eliminando las variables predictoras irrelevantes al forzar los coeficientes correspondientes a cero. Es importante destacar que para poder realizar este análisis debemos convertir las variables a codificación one-hot. La codificación "one-hot" es una técnica de codificación utilizada en el aprendizaje automático y la minería de datos para representar variables categóricas como variables numéricas.
+
+Por ejemplo, si se tiene una variable categórica "color" con tres posibles valores: rojo, verde y azul, se crearían tres variables binarias: "color_rojo", "color_verde" y "color_azul". Para cada fila en los datos, la variable binaria correspondiente al valor real de la variable categórica tendría el valor 1 y las demás variables binarias tendrían el valor 0.
+
+```{r, chunck14, echo=FALSE}
+# Transformamos las variables a codificación dummy
+results <- fastDummies::dummy_cols(data_reduced[,2:8])
+data_dummy <- cbind(data_reduced[1], results[8:21])
+
+knitr::kable(
+data_dummy[1:5, 1:8],
+caption ="Chronic kidney disease dataset:"
+)
+```
+
+Una vez creado el dataset realizamos el análisis.
+
+```{r, chunck15, echo=FALSE}
+# Separar la variable respuesta del resto de las variables
+y <- data_dummy$affected
+x <- data_dummy[, -which(names(data_dummy) == "affected")]
+
+# Crear la matriz de predictores
+x <- as.matrix(x)
+
+# Crear una lista de valores lambda para la regresión lasso
+lambda_seq <- 10^seq(10, -2, length = 100)
+
+# Realizar la regresión lasso
+lasso_model <- cv.glmnet(x, y, alpha = 1, lambda = lambda_seq, family = "binomial")
+
+# Seleccionar el mejor valor de lambda
+best_lambda <- lasso_model$lambda.min
+
+# Obtener los coeficientes del modelo para el mejor lambda
+lasso_coefs <- coef(lasso_model, s = best_lambda)
+
+# Imprimir los coeficientes del modelo
+print(lasso_coefs)
+
+# Coeficientes distintos de 0
+names(lasso_coefs)[lasso_coefs != 0]
+```
+
+Como se puede ver, todos los coeficientes son muy cercanos a cero, lo que indica que estas variables al parecer no son útiles para predecir la variable respuesta.
+
+Regresion lasso con todas las variables del dataset.
+
+```{r, chunck16, echo=FALSE}
+# Transformamos las variables a codificación dummy
+results <- fastDummies::dummy_cols(data[,2:24])
+data_dummy_2 <- cbind(data[1], results[24:145])
+
+# Separar la variable respuesta del resto de las variables
+y <- data_dummy_2$affected
+x <- data_dummy_2[, -which(names(data_dummy) == "affected")]
+
+# Crear la matriz de predictores
+x <- as.matrix(x)
+
+# Crear una lista de valores lambda para la regresión lasso
+lambda_seq <- 10^seq(10, -2, length = 100)
+
+# Realizar la regresión lasso
+lasso_model <- cv.glmnet(x, y, alpha = 1, lambda = lambda_seq, family = "binomial")
+
+# Seleccionar el mejor valor de lambda
+best_lambda <- lasso_model$lambda.min
+
+# Obtener los coeficientes del modelo para el mejor lambda
+lasso_coefs <- coef(lasso_model, s = best_lambda)
+
+# Coeficientes distintos de 0
+names(lasso_coefs)[lasso_coefs != 0]
+```
+
+Según este análisis tal como están las variables codificadas no parecen aportar ningún tipo de información relevante.
+
+#### Análisis de componentes principales (PCA)
+
+El análisis de componentes principales (PCA) es una técnica de reducción de dimensionalidad que se utiliza para transformar un conjunto de variables correlacionadas en un conjunto más pequeño de variables no correlacionadas llamadas "componentes principales". La idea detrás de PCA es reducir la complejidad de un conjunto de datos al encontrar las variables que contribuyen más a su variabilidad y proyectar los datos en un espacio de menor dimensión, manteniendo la mayor cantidad posible de información. Esta es técnica se usa normalmente con variable numericas pero aprovechando que hemos creado un `dataset` nuevo con codificación one-hot podemos ver que resultados nos otorga el análisis PCA.
+
+```{r, chunck17, echo=FALSE}
+# Eliminar la variable de respuesta del conjunto de datos
+data_dummy_2_sub <- subset(data_dummy_2, select = -c(affected))
+
+# Realizar el PCA en el conjunto de datos sin la variable de respuesta
+pca <- prcomp(data_dummy_2_sub)
+
+# Cálculo de la varianza explicada acumulada 
+prop_varianza <- pca$sdev^2/sum(pca$sdev^2)
+prop_varianza_acum <- cumsum(prop_varianza)
+ggplot(data = data.frame(prop_varianza_acum, pc = factor(1:122)),
+       aes(x = pc, y = prop_varianza_acum, group = 1)) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Componentes principales", 
+       y = "Prop. varianza explicada acumulada")
+
+```
+
+Con las 20 primeras dimensiones abarcamos un 70% de la variabilidad respecto a las 31 que necesitabamos en el MCA.
+
+```{r, chunck18, echo=FALSE}
+dimensiones<-as.data.frame(pca$x[,1:21])
+dimensiones <- cbind(data$affected, dimensiones)
+modelo <- glm(affected ~ ., data = dimensiones, family = binomial)
+summary(modelo)
+```
+
+De nuevo los erorres estandart son muy altos, tenemos estimaciónes cercanas a 0 valores Pr(>|Z|) iguales a 1.
+
+En conclusión parece que no hay ninguna combinación de variables que no resulte problemática pues la toma de datos parece bastante sesgada, sin embargo vamos a continuar con los modelos predictivos usando las variables selecionadas tras el análisis MCA a ver que resultados obtenemos.
+
+## Contrucción y mejora de modelos
+
+El primer paso será equilibrar la variable respuesta.
+
+```{r, chunck19, echo=FALSE}
+table(data_reduced$affected)
+```
+
+El desequilibrio en la variable respuesta puede provocar que nuestros modelos tengan un sesgo hacia la clase mayoritaria, podemos resolver este problema sobremuestreando de forma sintética la clase minoritaria, para ello usamos el paquete ROSE.
+
+```{r, chunck20, echo=FALSE}
+# Generamos datos sintéticos
+datos_sinteticos <- ovun.sample(affected ~ ., data_reduced, method = "both", N = 256, seed = 1234)
+data_sint <- datos_sinteticos$data
+table(data_sint$affected)
+```
+
+Vemos que ahora las variable respuesta esta casi en una proporición del 50% cuanto antes solo habían 72 pacientes sanos frente a 128 enfermos.
+
+A continuación dividimos el dataset en un conjunto de entrenamiento y otro de prueba.
+
+```{r, chunck21, echo=FALSE}
+set.seed(1234)
+train<-data_sint[sample(nrow(data_sint), size =round(0.67*nrow(data_sint)), replace=FALSE),]
+test<-data_sint[sample(nrow(data_sint), size=round(0.33*nrow(data_sint)), replace=FALSE),]
+
+# Obtenemos las etiquetas
+datos_train_labels <- train[,1]
+datos_test_labels <- test[,1]
+
+# Quitamos las etiquetas de los set de entrenamiento y test
+train<-train[,-1]
+test<-test[,-1]
+```
+
+### KNN
+
+El algoritmo funciona calculando la distancia entre el punto de datos que se está intentando clasificar y los puntos de datos más cercanos en el conjunto de entrenamiento. Luego, utiliza las etiquetas de clase de los k vecinos más cercanos para determinar la etiqueta de clase del punto de datos de prueba.
+
+Teóricamente el mejor de los valores para k equivale a al número impar más cercano a la raíz cuadrada del número total de muestras de entrenamiento. Se busca un número impar para que las votaciones nunca empaten. En este caso el valor k óptimo parece ser 13.
+
+```{r chunck22, echo=FALSE}
+# Configuramos un método de control del tuneado de los hiperparámetros.
+training_control <- trainControl(method = "cv",
+                                 summaryFunction = defaultSummary,
+                                 number = 5,
+                                 )
+
+# Entrenamos los modelos
+set.seed(123)
+knn <- train(train, as.factor(datos_train_labels),
+          method = "knn",
+          metric = "Accuracy",
+          trControl = training_control,
+          tuneGrid = data.frame(k = c(5,8,11,13,17,20,25,30,35,40,45,55,70)))
+
+# Usaremos el modelo guardado en $finalModel para hacer las predicciones
+knn.pred <- predict(knn$finalModel, newdata = test, type = "class")
+
+# Evaluamos el modelo
+(knn.conf.1 <- confusionMatrix(data = datos_test_labels, reference = knn.pred))
+
+```
+
+Recordemos que los clasificados como 1 padecen CKD y los codificados con 0 están sanos del riñón. vemos como se han producido un total de 12 falsos positivos frente a 0 falsos negativos, todo apunta a que el modelo a pesar de tener la variable respuesta equilibrada sigue teniendo un sesgo hacia la clase originalmente predominante. Además el modelo selecionado fue el de k = 5 que quizás es algo pequeño y menor del esperado el modelo puede pecar de sobreajustarse a los datos de entrenamiento y ser menos preciso con datos diferentes.
+
+### Support vector machine
+
+El objetivo del SVM es encontrar un hiperplano en un espacio de alta dimensión que separe los datos en diferentes categorías. El hiperplano se elige de tal manera que maximiza la distancia entre los puntos de datos de ambas categorías más cercanas.
+
+SVM puede manejar tanto variables numéricas como categóricas. En el caso de variables categóricas, es necesario convertirlas en variables numéricas antes de aplicar SVM. Una forma común de hacerlo es mediante la codificación de etiquetas o "one-hot encoding", tal y como hicimos anteriormente.
+
+```{r chunck23, echo=FALSE}
+# Codificación one hot del conjunto de entrenamiento y prueba
+one_hot_train <- fastDummies::dummy_cols(train)
+one_hot_train <- one_hot_train[,8:21] 
+one_hot_test <- fastDummies::dummy_cols(test)
+one_hot_test <- one_hot_test[,8:21] 
+```
+
+Una vez transformadas las variables procedemos a aplicar el SVM.
+
+#### Kernel Lineal
+
+Los kernels lineales son una forma de función kernel utilizada en las máquinas de vectores de soporte (SVM) para separar datos en un espacio. Una ventaja de los kernels lineales es que son computacionalmente eficientes y fáciles de implementar. Sin embargo, su capacidad de separación es limitada y no funcionan bien en conjuntos de datos no lineales.
+
+```{r chunck24, echo=FALSE}
+set.seed(123)
+train_svm <- cbind(datos_train_labels, one_hot_train)
+
+# Método de kernel lineal
+svm_lineal <- train(as.factor(datos_train_labels) ~ ., data = train_svm, method = "svmLinear",
+                 trControl = training_control, tuneLength = 10)
+
+# Predecir las etiquetas de clase para el conjunto de prueba usando el modelo SVM
+svm_pred_1 <- predict(svm_lineal, one_hot_test)
+
+# Comparar las etiquetas de clase predichas con las etiquetas de clase reales del conjunto de prueba
+(svm.lineal.conf.1 <- confusionMatrix(svm_pred_1, datos_test_labels))
+```
+
+Este modelo ha dado unos buenos resultados tal como mencionabamos en la PEC 1 los SVM son generalmente buenas opciones con dataset de variables categóricas.
+
+#### Kernel radial.
+
+```{r, chunck25, echo=FALSE}
+# Método de kernel radial
+set.seed(123)
+svm_radial <- train(as.factor(datos_train_labels) ~ ., data = train_svm, method = "svmRadial",
+                 trControl = training_control, tuneLength = 10)
+
+# Predecir las etiquetas de clase para el conjunto de prueba usando el modelo SVM
+svm_pred_2 <- predict(svm_radial, one_hot_test)
+
+# Comparar las etiquetas de clase predichas con las etiquetas de clase reales del conjunto de prueba
+(svm.radial.conf.1 <- confusionMatrix(svm_pred_2, datos_test_labels))
+```
+
+El resultado obtenido es el mismo, es posible que los datos sean linealmente separables. En este caso, un kernel lineal es suficiente para encontrar la mejor separación de las clases en el espacio de características.
+
+### Decision tree
+
+Este método de aprendizaje automático se basa en la construcción de un arbol mediante la selección de la mejore variable para dividir los datos en cada nivel, y esta selección se basa en un criterio que busca maximizar la homogeneidad de los grupos resultantes o minimizar la impureza de los mismos. Esto se realiza hasta que los nodos no se pueden dividir más, y se obtiene el árbol completo.
+
+Una de las principales ventajas de los árboles de decisión es que son fáciles de interpretar y visualizar. Además, pueden manejar tanto variables categóricas como numéricas, y son resistentes a valores atípicos y valores faltantes.
+
+```{r, chunck26, echo=FALSE}
+# Crear modelo de árbol de decisión
+train_tree <- cbind(datos_train_labels, train)
+tree_model <- rpart(datos_train_labels ~ ., data = train_tree)
+
+# Realizar predicciones en el conjunto de prueba
+set.seed(123)
+tree_pred <- predict(tree_model, test, type = "class")
+
+# Matriz de confusión
+(tree.conf.1 <- confusionMatrix(tree_pred, datos_test_labels))
+```
+
+En este caso se obtuvo un número muy grande de falsos negativos que son quizá aun más preocupantes que los falsos negativos pues pueden dar lugar a diagnósticos mucho más tardios y en fases en los que la enfermedad está demasiado avanzada. En la anterior PEC comentabamos que los arboles de decisiones son muy útiles con este tipo de datos por lo que un resultado tan malo es bastante sorprendente.
+
+### Random forest
+
+En lugar de construir un solo árbol de decisión, Random Forest construye una cantidad de árboles de decisión y luego realiza una votación para la clasificación final.
+
+Vamos a crear 3 modelos, uno con 5 árboles otro con 20 otro con 40 y el último con 80 a ver cual es el que mejor funciona. Por lo general, se recomienda usar un número suficientemente grande de árboles para que el modelo tenga una buena precisión, pero no tan grande que el costo computacional se vuelva prohibitivo. Por tanto el modelo con mayor número de árboles debería ser el más preciso.
+
+```{r, chunck27, echo=FALSE}
+# Entrena el modelo de Random Forest (5 arboles)
+set.seed(1234)
+train_forest <- cbind(datos_train_labels, train)
+rf_model_1 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 5)
+
+# Utiliza el modelo para predecir los resultados en los datos de prueba
+rf_pred_1 <- predict(rf_model_1, newdata = test)
+
+# Evalúa el rendimiento del modelo
+forest.5.conf.1 <- confusionMatrix(rf_pred_1, datos_test_labels)
+forest.5.conf.1$table
+
+# Entrena el modelo de Random Forest (20 arboles)
+set.seed(1234)
+rf_model_2 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 20)
+rf_pred_2 <- predict(rf_model_2, newdata = test)
+forest.20.conf.1 <- confusionMatrix(rf_pred_2, datos_test_labels)
+forest.20.conf.1$table
+
+# Entrena el modelo de Random Forest (40 arboles)
+set.seed(1234)
+rf_model_3 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 40)
+rf_pred_3 <- predict(rf_model_3, newdata = test)
+forest.40.conf.1 <- confusionMatrix(rf_pred_3, datos_test_labels)
+forest.40.conf.1$table
+
+# 80 arboles
+set.seed(1234)
+rf_model_4 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 80)
+rf_pred_4 <- predict(rf_model_4, newdata = test)
+forest.80.conf.1 <- confusionMatrix(rf_pred_4, datos_test_labels)
+forest.80.conf.1$table
+
+
+```
+
+Vemos que la precisión prácticamente no varía en ninguno de los casos esto puede ser debido a que con tan solo 5 árboles ya se ha alcanzado el límite de convergencia del modelo. Es decir, es posible que el modelo haya logrado la mejor combinación posible de precisión y complejidad con solo 5 árboles, y no haya necesidad de agregar más árboles para mejorar la precisión del modelo. Normalmente se alcanza el limete de convergencia con un número bajo de árboles cuando el conjunto de datos no es muy grande o cuando hay pocas variables como es este caso.
+
+### Regresión binomial.
+
+Por último vamos a probar con la regresión aunque como sabemos los predictores no van a resultar significativos.
+
+```{r chunck28, echo=FALSE}
+# Entrena el modelo de regresión binomial
+train_reg <- cbind(datos_train_labels, train)
+reg_model <- glm(datos_train_labels ~ ., data = train_reg, family = binomial)
+summary(reg_model)
+
+# Realiza la predicción con el modelo entrenado
+reg_pred <- predict(reg_model, newdata = test, type = "response")
+
+# Convierte las probabilidades en 0 o 1
+reg_pred_class <- ifelse(reg_pred > 0.5, 0, 1)
+reg_pred_class <- as.factor(reg_pred_class)
+
+# Evalúa el rendimiento del modelo
+(reg.conf.1 <- confusionMatrix(reg_pred_class, datos_test_labels))
+```
+
+Los resultados obtenidos son buenos pero el modelo no parece muy fiable, los errores son altisimos, las variables no son significativas etc.
+
+A pesar de que algunos de los resultados obtenidos en ciertos modelos son positivos y están por encima de las precisiones que estipulamos en la planificación del trabajo creo que el hecho de que la mayoría de los niveles de muchas variables esten muy desvalanceados están provocando problemas en el análisis. Una posible solución es agrupas los niveles minoritarios para compensar las variables teniendo en cuenta la perdida de información que esto provocaría por otro lado si las variables no son muy importantes para el modelo podemos plantear eliminarlas.
+
+## Segunda construcción de modelos
+
+Vamos a acceder de nuevo al resumen de todas las variables, vamos a ver que niveles de variables se pueden agrupar y que variables no vale la pena tener en cuenta en el análisis.
+
+```{r chunck29, echo=FALSE}
+summary(data)
+```
+
+Modificaciones:
+
+- Sg: Las 3 muestras del nivel 0 se englobarán en el nivel 1.
+
+- al: los niveles del 1 al 4 se unirán en uno solo.
+
+- rbcc: 0:3, 4, 5:8
+
+- wbcc: 0:5, 6, 7:8
+
+- bgr: unir los niveles del 2 al 9
+
+- bu: Unir los niveles del 1 al 7
+
+- hemo: unir 0:2, 3:5 y 6:9
+
+- pcv: 0:3, 4:5, 6, 7:9
+
+- age: 0:4, 5:6, 7:9 
+
+```{r, chunk30, echo=FALSE}
+# Unificar niveles
+sg_new <- recode_factor(data$sg, 
+                        `0` = 1,
+                        `1` = 1,
+                        `2` = 2,
+                        `3` = 3,
+                        `4` = 4)
+
+al_new <- recode_factor(data$al, 
+                        `0` = 0,
+                        `1` = 1,
+                        `2` = 1,
+                        `3` = 1,
+                        `4` = 1)
+
+rbcc_new <- recode_factor(data$rbcc,
+                         `0` = 0,
+                         `1` = 0,
+                         `2` = 0,
+                         `3` = 0,
+                         `4` = 1,
+                         `5` = 2,
+                         `6` = 2,
+                         `7` = 2,
+                         `8` = 2,
+                         `9` = 2)
+
+wbcc_new <- recode_factor(data$wbcc,
+                         `0` = 0,
+                         `1` = 0,
+                         `2` = 0,
+                         `3` = 0,
+                         `4` = 0,
+                         `5` = 0,
+                         `6` = 1,
+                         `7` = 2,
+                         `8` = 2)
+
+bgr_new <- recode_factor(data$bgr,
+                         `0` = 0,
+                         `1` = 1,
+                         `2` = 2,
+                         `3` = 2,
+                         `4` = 2,
+                         `5` = 2,
+                         `6` = 2,
+                         `7` = 2,
+                         `8` = 2,
+                         `9` = 2)
+
+bu_new <- recode_factor(data$bu,
+                         `0` = 0,
+                         `1` = 1,
+                         `2` = 1,
+                         `3` = 1,
+                         `4` = 1,
+                         `5` = 1,
+                         `6` = 1,
+                         `7` = 1,
+                         `8` = 1,
+                         `9` = 1)
+
+hemo_new <- recode_factor(data$hemo,
+                         `0` = 0,
+                         `1` = 0,
+                         `2` = 0,
+                         `3` = 1,
+                         `4` = 1,
+                         `5` = 1,
+                         `6` = 2,
+                         `7` = 2,
+                         `8` = 2,
+                         `9` = 2)
+
+pcv_new <- recode_factor(data$pcv,
+                         `0` = 0,
+                         `1` = 0,
+                         `2` = 0,
+                         `3` = 0,
+                         `4` = 1,
+                         `5` = 1,
+                         `6` = 3,
+                         `7` = 4,
+                         `8` = 4,
+                         `9` = 4)
+
+age_new <- recode_factor(data$age,
+                         `0` = 0,
+                         `1` = 0,
+                         `2` = 0,
+                         `3` = 0,
+                         `4` = 0,
+                         `5` = 1,
+                         `6` = 1,
+                         `7` = 2,
+                         `8` = 2,
+                         `9` = 2)
+```
+
+Del resto de variables eliminaremos:
+
+- pot, sod, su, sc, appet, ane y pe están tan desequilibradas que no vale la pena incluirlas.
+
+- rbc (red blood cells) ya que está muy correlacionada con rbcc (red blood cells volume). 
+
+- pcc (pus cell clums) y ba (bacteria), ambas variables se correlacionan entre sí además de con pc (pus cells) siendo pc la más equilibrada de las 3 variables.
+
+- cad (coronary artery disease) está demasiado relacionada con la hipertensión además de estar desequilibrada.
+
+Con la nueva codificación el dataset queda de la siguiente manera:
+
+```{r, chunk31, echo=FALSE}
+
+data_2 <- cbind(affected, sg_new, al_new, data[6], bgr_new, bu_new, hemo_new, pcv_new, rbcc_new, wbcc_new, data[18:19], age_new)
+data_2 <- as.data.frame(data_2)
+
+knitr::kable(
+data_2[1:5, ],
+caption ="Chronic kidney disease dataset:"
+)
+```
+
+**TABLA RESUMEN NUEVA CODIFICACIÓN**
+
+
+Vemos que ahora las variables están algo más niveladas.
+
+```{r, chunk32, echo=FALSE}
+summary(data_2)
+```
+
+Vamos a ver como se relacionan algunas de las variables con la enfermedad crónica de riñón.
+
+```{r, chunk33, echo=FALSE}
+ggplot(data_2, aes(x = affected, fill = affected)) +
+  geom_bar() +
+  facet_wrap(~ age_new) +
+  labs(x = "Edad", y = "Frecuencia", fill = "CKD")
+```
+
+Como era de esperar a medida que avanza la edad las probabilidades de padecer CKD aumentan
+
+```{r, chunk34, echo=FALSE}
+ggplot(data_2, aes(x = hemo_new, fill = affected)) +
+  geom_bar() +
+  facet_wrap(~ age_new) +
+  labs(x = "Edad", y = "Frecuencia", fill = "CKD")
+```
+
+En este gráfico añadimos también los niveles de hemoglobina, en este caso vemos como en los 3 grupos de edad niveles medios de hemoglobina en sangre están relacionados con la ausencia de CKD por otroa lado cuando los niveles de hemoglobina son muy altos o en especial si son bajos parecen ser un síntoma de CKD.
+
+Variable conflictivas:
+
+Como mencinamos anteriormente hay algunas variables que tienen uno de sus niveles totalmente relacionado con la enfermedad crónica de riñón. Por ejemplo, el 100% de los pacientes con hipertensión tenían CKD, lo mismo pasa en variables como los niveles de albumina, con la variable pc (pus cell) o dm (diabetes melitus)
+
+```{r, chunk35, echo=FALSE}
+graf_1 <- ggplot(data_2, aes(x = htn, fill = affected)) +
+             geom_bar() +
+             labs(x = "Hipertension", y = "Frecuencia", fill = "CKD")
+
+graf_2 <- ggplot(data_2, aes(x = al_new, fill = affected)) +
+             geom_bar() +
+             labs(x = "Nivel de Albumina", y = "Frecuencia", fill = "CKD")
+
+graf_3 <- ggplot(data_2, aes(x = pc, fill = affected)) +
+              geom_bar() +
+              labs(x = "Células de pus", y = "Frecuencia", fill = "CKD")
+
+graf_4 <- ggplot(data_2, aes(x = dm, fill = affected)) +
+              geom_bar() +
+              labs(x = "Diabetes", y = "Frecuencia", fill = "CKD")
+
+grid.arrange(graf_1, graf_2, graf_3, graf_4, ncol = 2)
+ 
+```
+
+Estas variables parecen fuertes predictores de CKD pero debemos tener en cuenta que el desbalanceo de la variable affected puede provocar un descenso en la precisión del modelo.
+
+### Tecnicás de reducción de multidimensionalidad
+
+Igual que en el caso anterior empezaremos por el MCA que es el procedimiento estandar cuando se reduce la dimensionalidad de bases de datos con variables unicamente categóricas.
+
+```{r, chunk36, echo=FALSE}
+res.mca <- MCA(data_2[-1], graph = FALSE)
+
+# Variabilidad explicada por cada variable
+eig.val <- get_eigenvalue(res.mca)
+fviz_screeplot(res.mca, addlabels = TRUE, ylim = c(0, 45))
+```
+
+Vemos como con las 9 primeras dimensiones abarcamos más del 70% de la variabilidad total y en concreto con las dos primeras casi un 35%. Este resultado es mucho mejor que el del análisis anterior donde necesitabamos 31 dimensiones para alcanzar el 70% de la variabilidad y las dos primeras solo abarcaban el 12% de la variabilidad.
+
+Visualizamos la posición de cada variable en las dos primeras dimensiones.
+
+```{r, chunk37, echo=FALSE}
+fviz_mca_var(res.mca, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE, # Avoid text overlapping
+             ggtheme = theme_minimal())
+
+```
+
+Vemos como ahora las variables se distribuyen de forma más homogénea y no hay tantas variables "outliners" como pasaba en el anterior MCA.
+
+En la primera dimensión htn en su nivel 1 tiene un valor positivo bastante alto y en su nivel 0 un valor muy negativo, otras variables como al_new, dm_new, bu_new y pc ocupan posiciones muy parecidas a htn esto puede indicar que las variables están bastante relacionadas y que aportan la misma información. Tiene sentido pensar que la existe una correlación entre la hipertensión y la diabetes. De hecho, se sabe que la hipertensión es una de las complicaciones más comunes de la diabetes y que las personas con diabetes tienen un mayor riesgo de desarrollar hipertensión. 
+
+Las variables rbcc y pcv parecen estar correlacionadas, ambas hacen referencia al volumen celular en sangre y varios de sus niveles ocupan ubicaciones pareceidas en la representación.
+
+La edad no parece poder aportar más información de la que aporta la hipertensión con la que está relacionada, lo mismo pasa con wbcc, su aportación en la primera dimensión es casi nula a pesar de ser algo importante en la segunda.
+
+Otra variable que aporta poca información es la variable bgr que está totalmente relacionada con la diabetes, lo cual tiene sentido pues los enfermos de diabetes pueden tener sus niveles de glucosa alterados.
+
+Todos los niveles de la variable hemoglobina destacan en alguna dimensió o en ambas.
+
+En conclusión las variables hipertensión hemoglobina y rbcc parecen aportar información relevante y vale la pena mantenerlas.
+
+Si nos fijamos donde quedan representadas las muestras 
+
+```{r, chunk38, echo=FALSE}
+fviz_mca_ind(res.mca, col.ind = "cos2", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE, # Avoid text overlapping (slow if many points)
+             ggtheme = theme_minimal())
+
+```
+
+La mayoría de las muestras se concentran en lugares donde aparecen niveles de rbcc htn o hemo. El análisis apunta a que podríamos lograr un buen modelo tan solo con esas tres variables. 
+
+Creamos un modelo de regresión con estas 3 variables.
+
+```{r, chunk39, echo=FALSE}
+model_1 <- glm(affected ~ hemo_new + htn + rbcc_new, data = data_2, family = binomial)
+summary(model_1)
+```
+
+El modelo parece tener un problema con la variable "htn1", ya que su coeficiente muestra un valor muy alto (21.8034) junto con un error estándar igualmente alto (1605.4013). Es posible que se deba revisar la inclusión de esta variable en el modelo y considerar si es necesario buscar más información o transformarla antes de incluirla.
+
+Este problema puede resultar de que el 100% de los pacientes hipertensos padecen de CKD lo que puede desviar el modelo. Si en vez de la hipertensión añadimos cualquiera de las variables mencionadas anteriormente con este problema (dm, al o pc) pasa lo mismo.
+
+Podemos comprobar que pasa si en vez de la hipertensión incluimos la urea en sangre la cual ocupa posiciones parecidas en el plano.
+
+```{r, chunk40, echo=FALSE}
+model_2 <- glm(affected ~ hemo_new + bu_new + rbcc_new, data = data_2, family = binomial)
+summary(model_2)
+vif(model_2)
+```
+
+Vemos que en este caso el modelo parece mucho más fiable todas las variables resultan ser significativas y tanto las estimaciones como los errores standart parecen tomar valores fiables, aún debemos crear los modelos pero estas 3 variables parecen bastante prometedoras a la hora de diagnosticar CKD. Los valores de VIF muestran que no parece haber ningún tipo de colinealidad entre variables contrariamente a lo que conceptualmente explican los niveles de hemoglobina y de globulos rojos en sangre.
+
+Vamos a comprobar si se puede añadir alguna variable más que affecte positivamente al modelo. Añadimos wbcc_new que como vimos en el MCA ya que a pesar de no aportar mucho a la primera dimensión si lo hace a la segunda.
+
+
+```{r, chunk41, echo=FALSE}
+model_3 <- glm(affected ~ hemo_new + bu_new + wbcc_new + rbcc_new, data = data_2, family = binomial)
+summary(model_3)
+
+anova(model_2, model_3, test = "Chi")
+```
+
+El valor de Pr(>Chi) muestra el nivel de significancia para la prueba de chi-cuadrado, donde un valor menor que 0.05 indica que hay una diferencia significativa entre los modelos. En este caso, el valor de Pr(>Chi) es 0.1454, lo que indica que no hay suficiente evidencia para rechazar la hipótesis nula de que los dos modelos son iguales. Por lo tanto, no se puede concluir que agregar la variable predictora wbcc_new tenga un impacto significativo en la capacidad predictiva del modelo.
+
+
+```{r, chunk42, echo=FALSE}
+model_4 <- glm(affected ~ hemo_new + bu_new + wbcc_new + age_new + rbcc_new, data = data_2, family = binomial)
+summary(model_4)
+
+anova(model_2, model_4, test = "Chi")
+
+data_final <- cbind(data_2[1], data_2[6:7], data_2[9])
+```
+
+Añadir la edad tampoco parece servir. Puesto que tanto wbcc como age no aportan información significativa al modelo y puesto que el resto de variables generan variables con errores estandar y estimaciones altísimas lo mejor será quedarnos solo con "hemo", "bu_new" y "rbcc_new".
+
+## Contrucción y mejora de modelos
+
+Una vez selecionadas las variables vamos a equilibrar la variable respuesta y a dividir el dataset en un conjunto de entrenamiento y otro de test. El 66% del dataset se usará para entrenar el modelo y el otro 34% para testearlo.
+
+```{r, chunck43, echo=FALSE}
+# Generamos datos sintéticos
+datos_sinteticos <- ovun.sample(affected ~ ., data_final, method = "both", N = 256, seed = 1234)
+data_sint <- datos_sinteticos$data
+table(data_sint$affected)
+
+set.seed(1234)
+train<-data_sint[sample(nrow(data_sint), size =round(0.67*nrow(data_sint)), replace=FALSE),]
+test<-data_sint[sample(nrow(data_sint), size=round(0.33*nrow(data_sint)), replace=FALSE),]
+
+# Obtenemos las etiquetas
+datos_train_labels <- train[,1]
+datos_test_labels <- test[,1]
+
+# Quitamos las etiquetas de los set de entrenamiento y test
+train<-train[,-1]
+test<-test[,-1]
+```
+
+Vemos que ahora las variable respuesta esta casi en una proporición del 50% cuanto antes solo habían 72 pacientes sanos frente a 128 enfermos.
+
+Ahora recreamos los modelos tal y como hicimos anteriormente.
+
+### KNN:
+
+Teóricamente el mejor de los valores para k equivale a al número impar más cercano a la raíz cuadrada del número total de muestras de entrenamiento. Se busca un número impar para que las votaciones nunca empaten. En este caso el valor k óptimo parece ser 13.
+
+```{r chunck44, echo=FALSE}
+# Configuramos un método de control del tuneado de los hiperparámetros.
+training_control <- trainControl(method = "cv",
+                                 summaryFunction = defaultSummary,
+                                 number = 5,
+                                 )
+
+
+# Entrenamos los modelos
+set.seed(123)
+knn <- train(train, as.factor(datos_train_labels),
+          method = "knn",
+          metric = "Accuracy",
+          trControl = training_control,
+          tuneGrid = data.frame(k = c(5,8,13,17,25,30,40)))
+
+# Usaremos el modelo guardado en $finalModel para hacer las predicciones
+knn.pred <- predict(knn$finalModel, newdata = test, type = "class")
+
+# Evaluamos el modelo
+(knn.conf <- confusionMatrix(data = datos_test_labels, reference = knn.pred))
+```
+
+Los valores de precisión obtenidos son altos lo que sugieren que el modelo es bastante preciso en sus predicciones con tan solo 2 falsos positivos y 2 falsos negativos.
+
+```{r chunck45, echo=FALSE}
+knn$finalModel
+```
+
+El valor de K escogido por el modelo fue de K = 17, un poco superior al que pensabamos que era el ideal, por otro lado los resultados obtenidos en este caso son mucho mejores que con las variables anteriores.
+
+### Suport vector machine
+
+Transformamos de nuevo las variable a codificación one-hot y creamos los modelos.
+
+```{r chunck46, echo=FALSE}
+# Codificación one hot del conjunto de entrenamiento y prueba
+one_hot_train <- fastDummies::dummy_cols(train)
+one_hot_train <- one_hot_train[,4:11] 
+one_hot_test <- fastDummies::dummy_cols(test)
+one_hot_test <- one_hot_test[,4:11] 
+
+# Comprobación de que las variables son numéricas
+str(one_hot_train)
+
+# Mostramos el dataset.
+knitr::kable(
+one_hot_train[1:5, ],
+caption ="Codificación one-hot"
+)
+
+```
+
+#### Kernel Lineal
+
+```{r chunck47, echo=FALSE}
+set.seed(123)
+train_svm <- cbind(datos_train_labels, one_hot_train)
+
+# Método de kernel lineal
+svm_lineal <- train(as.factor(datos_train_labels) ~ ., data = train_svm, method = "svmLinear",
+                 trControl = training_control, tuneLength = 10)
+
+# imprimir la precisión media y los mejores hiperparámetros encontrados
+print(svm_lineal)
+
+# Predecir las etiquetas de clase para el conjunto de prueba usando el modelo SVM
+svm_pred_1 <- predict(svm_lineal, one_hot_test)
+
+# Comparar las etiquetas de clase predichas con las etiquetas de clase reales del conjunto de prueba
+(svm.lineal.conf <- confusionMatrix(svm_pred_1, datos_test_labels))
+```
+
+Vemos que en este caso los resultados son algo peores que al utilizar el algoritmo KNN y los mismos que en el anterior SVM.
+
+#### Kernel radial.
+
+```{r, chunck48, echo=FALSE}
+# Método de kernel radial
+set.seed(123)
+svm_radial <- train(as.factor(datos_train_labels) ~ ., data = train_svm, method = "svmRadial",
+                 trControl = training_control, tuneLength = 10)
+
+# imprimir la precisión media y los mejores hiperparámetros encontrados
+print(svm_radial)
+
+# Predecir las etiquetas de clase para el conjunto de prueba usando el modelo SVM
+svm_pred_2 <- predict(svm_radial, one_hot_test)
+
+# Comparar las etiquetas de clase predichas con las etiquetas de clase reales del conjunto de prueba
+(svm.radial.conf <- confusionMatrix(svm_pred_2, datos_test_labels))
+```
+
+El resultado obtenido es el mismo, es posible que los datos sean linealmente separables. En este caso, un kernel lineal es suficiente para encontrar la mejor separación de las clases en el espacio de características.
+
+### Decision tree
+
+```{r, chunck49, echo=FALSE}
+# Crear modelo de árbol de decisión
+train_tree <- cbind(datos_train_labels, train)
+
+set.seed(123)
+tree_model <- rpart(datos_train_labels ~ ., data = train_tree)
+
+# Realizar predicciones en el conjunto de prueba
+tree_pred <- predict(tree_model, test, type = "class")
+
+# Matriz de confusión
+(tree.conf <- confusionMatrix(tree_pred, datos_test_labels))
+```
+
+En este caso, la matriz de confusión muestra que el modelo predijo correctamente 80 de las 84 observaciones en el set de prueba, lo que resulta en una tasa de precisión del 95.24%. El modelo tiene una sensibilidad del 91.11% y una especificidad del 100%, lo que significa que el modelo tiene una alta capacidad para identificar tanto verdaderos positivos como verdaderos negativos.
+
+El árbol se divide en cinco nodos. El nodo raíz (nodo 1) divide el conjunto de datos de entrenamiento en dos grupos, uno con 97 observaciones y otro con 75 observaciones. Las divisiones se basan en las tres variables predictoras. El nodo 2 tiene 97 observaciones y se divide en dos subnodos. El nodo 3 tiene 75 observaciones, el nodo 4 tiene 73 observaciones y el nodo 5 tiene 24 observaciones.
+
+En este caso, la tasa de error esperada para el nodo raíz (0.6296296) es relativamente alta, lo que sugiere que el modelo no es muy preciso en su predicción. Sin embargo, la tasa de error se reduce en los nodos 2 y 3, lo que indica que el modelo está logrando discriminar entre las clases en esos nodos. La proporción de observaciones en cada nodo también parece estar razonablemente balanceada.
+
+### Random forest.
+
+Creamos de nuevo 4 modelos, uno con 5 árboles, otro con 20, otro con 40 y otro con 80.
+
+```{r, chunck50, echo=FALSE}
+# Entrena el modelo de Random Forest (5 arboles)
+set.seed(1234)
+train_forest <- cbind(datos_train_labels, train)
+rf_model_1 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 5)
+
+# Utiliza el modelo para predecir los resultados en los datos de prueba
+rf_pred_1 <- predict(rf_model_1, newdata = test)
+
+# Evalúa el rendimiento del modelo
+forest.5.conf <- confusionMatrix(rf_pred_1, datos_test_labels)
+forest.5.conf$table
+
+# Entrena el modelo de Random Forest (20 arboles)
+set.seed(1234)
+rf_model_2 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 20)
+rf_pred_2 <- predict(rf_model_2, newdata = test)
+forest.20.conf <- confusionMatrix(rf_pred_2, datos_test_labels)
+forest.20.conf$table
+
+# Entrena el modelo de Random Forest (40 arboles)
+set.seed(1234)
+rf_model_3 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 40)
+rf_pred_3 <- predict(rf_model_3, newdata = test)
+forest.40.conf <- confusionMatrix(rf_pred_3, datos_test_labels)
+forest.40.conf$table
+
+# 80 arboles
+set.seed(1234)
+rf_model_4 <- randomForest(datos_train_labels ~ ., data = train_forest, ntree = 80)
+rf_pred_4 <- predict(rf_model_4, newdata = test)
+forest.80.conf <- confusionMatrix(rf_pred_4, datos_test_labels)
+forest.80.conf$table
+```
+
+Al final se obtuvo la mejor precisión con 40 árboles, puede que en ese valor se alcanzase  el límite de la mejora en la precisión del modelo aumentar por tanto el número de árboles no hará más que sumar a la carga computacional. Por otro lado es algo extraño que en este caso se necesiten más árboles para llegar al modelo óptimo habiendo menos variables que en el caso anterior.
+
+### Regresión binomial.
+
+```{r chunck51, echo=FALSE}
+# Entrena el modelo de regresión binomial
+train_reg <- cbind(datos_train_labels, train)
+test_reg <- cbind(datos_test_labels, test)
+
+reg_model <- glm(datos_train_labels ~ ., data = train_reg, family = binomial)
+summary(reg_model)
+```
+
+Vemos que al dividir el dataset la cantidad de datos disponibles para el análisis ha disminuido y por tanto la potencia estadística.  Una forma de abordar esto es utilizando técnicas de regularización para reducir la complejidad del modelo y evitar el sobreajuste, lo que puede mejorar su capacidad de generalización. Una técnica comúnmente es la regresión logística Lasso.
+
+```{r chunck52, echo=FALSE}
+# Crear matriz de predictores X y variable respuesta y
+X <- model.matrix(~ ., data = train_reg[, -1])
+y <- as.numeric(train[, 1])
+
+# Realizar validación cruzada
+cv.fit <- cv.glmnet(X, y, family = "binomial", alpha = 1)
+
+# Encontrar el valor de lambda que minimiza el error
+best.lambda <- cv.fit$lambda.min
+
+# Crear modelo con el valor de lambda óptimo
+set.seed(123)
+lasso.model <- glmnet(X, y, family = "binomial", alpha = 1, lambda = best.lambda)
+
+# Hacer predicciones en el conjunto de prueba
+X_test <- model.matrix(~ ., data = test_reg[, -1])
+pred <- predict(lasso.model, newx = X_test, type = "response")
+
+# Crear matriz de confusión
+threshold <- 0.5 # Umbral de clasificación
+predicted_classes <- ifelse(pred > threshold, 1, 0)
+predicted_classes <- factor(predicted_classes, levels = c(1, 0))
+(lasso.conf <- confusionMatrix(predicted_classes, factor(datos_test_labels, levels = c(1, 0))))
+
+```
+
+Podemos aprecias que la regresión lasso no ha hecho muy buenas prediciones, podemos comprobar el peso que le ha dado a cada variable accediendo a sus coeficientes.
+
+```{r chunck53, echo=FALSE}
+coef(lasso.model)
+```
+
+Las variables predictoras (hemo_new1, hemo_new2, rbcc_new1, rbcc_new2) tienen coeficientes igual a cero, lo que indica que el modelo Lasso las ha eliminado como no relevantes para la predicción de la variable respuesta. El modelo solo está teniendo en cuenta una de las variables de ahí que el modelo sea tan malo y obviamente no nos sirve.
+
+## Evaluación de modelos.
+
+Para comparar los modelos, compararemos las medidas de exactitud, el valor kappa, la sensibilidad y especifidad de todos los modelos utilizados tanto los primeros en los que usamos 8 variables como los segundos donde usamos solamente 3.
+
+
+| Modelo             | Nº de Variables | Precisión                                  | Kappa                                      | Sensibilidad                               | Especifidad                                |
+|--------------------|-----------------|--------------------------------------------|--------------------------------------------|--------------------------------------------|--------------------------------------------|
+| KNN                | 7               | `r round(knn.conf.1$overall[1], 2)`        | `r round(knn.conf.1$overall[2], 2)`        | `r round(knn.conf.1$byClass[1], 2)`        | `r round(knn.conf.1$byClass[2], 2)`        |
+| SVM lineal         | 7               | `r round(svm.lineal.conf.1$overall[1], 2)` | `r round(svm.lineal.conf.1$overall[2], 2)` | `r round(svm.lineal.conf.1$byClass[1], 2)` | `r round(svm.lineal.conf.1$byClass[2], 2)` |
+| SVM radial         | 7               | `r round(svm.radial.conf.1$overall[1], 2)` | `r round(svm.radial.conf.1$overall[2], 2)` | `r round(svm.radial.conf.1$byClass[1], 2)` | `r round(svm.radial.conf.1$byClass[2], 2)` |
+| Decision Tree      | 7               | `r round(tree.conf.1$overall[1], 2)`       | `r round(tree.conf.1$overall[2], 2)`       | `r round(tree.conf.1$byClass[1], 2)`       | `r round(tree.conf.1$byClass[2], 2)`       |
+| Random forest (5)  | 7               | `r round(forest.5.conf.1$overall[1], 2)`   | `r round(forest.5.conf.1$overall[2], 2)`   | `r round(forest.5.conf.1$byClass[1], 2)`   | `r round(forest.5.conf.1$byClass[2], 2)`   |
+| Random forest (20) | 7               | `r round(forest.20.conf.1$overall[1], 2)`  | `r round(forest.20.conf.1$overall[2], 2)`  | `r round(forest.20.conf.1$byClass[1], 2)`  | `r round(forest.20.conf.1$byClass[2], 2)`  |
+| Random forest (40) | 7               | `r round(forest.40.conf.1$overall[1], 2)`  | `r round(forest.40.conf.1$overall[2], 2)`  | `r round(forest.40.conf.1$byClass[1], 2)`  | `r round(forest.40.conf.1$byClass[2], 2)`  |
+| Random forest (80) | 7               | `r round(forest.80.conf.1$overall[1], 2)`  | `r round(forest.80.conf.1$overall[2], 2)`  | `r round(forest.80.conf.1$byClass[1], 2)`  | `r round(forest.80.conf.1$byClass[2], 2)`  |
+| Regresión binomial | 7               | `r round(reg.conf.1$overall[1], 2)`        | `r round(reg.conf.1$overall[2], 2)`        | `r round(reg.conf.1$byClass[1], 2)`        | `r round(reg.conf.1$byClass[2], 2)`        |
+| KNN                | 3               | `r round(knn.conf$overall[1], 2)`          | `r round(knn.conf$overall[2], 2)`          | `r round(knn.conf$byClass[1], 2)`          | `r round(knn.conf$byClass[2], 2)`          |
+| SVM lineal         | 3               | `r round(svm.lineal.conf$overall[1], 2)`   | `r round(svm.lineal.conf$overall[2], 2)`   | `r round(svm.lineal.conf$byClass[1], 2)`   | `r round(svm.lineal.conf$byClass[2], 2)`   |
+| SVM radial         | 3               | `r round(svm.radial.conf$overall[1], 2)`   | `r round(svm.radial.conf$overall[2], 2)`   | `r round(svm.radial.conf$byClass[1], 2)`   | `r round(svm.radial.conf$byClass[1], 2)`   |
+| Decision Tree      | 3               | `r round(tree.conf$overall[1], 2)`         | `r round(tree.conf$overall[2], 2)`         | `r round(tree.conf$byClass[1], 2)`         | `r round(tree.conf$byClass[2], 2)`         |
+| Random forest (5)  | 3               | `r round(forest.5.conf$overall[1], 2)`     | `r round(forest.5.conf$overall[2], 2)`     | `r round(forest.5.conf$byClass[1], 2)`     | `r round(forest.5.conf$byClass[2], 2)`     |
+| Random forest (20) | 3               | `r round(forest.20.conf$overall[1], 2)`    | `r round(forest.20.conf$overall[2], 2)`    | `r round(forest.20.conf$byClass[1], 2)`    | `r round(forest.20.conf$byClass[2], 2)`    |
+| Random forest (40) | 3               | `r round(forest.40.conf$overall[1], 2)`    | `r round(forest.40.conf$overall[2], 2)`    | `r round(forest.40.conf$byClass[1], 2)`    | `r round(forest.40.conf$byClass[2], 2)`    |
+| Random forest (80) | 3               | `r round(forest.80.conf$overall[1], 2)`    | `r round(forest.80.conf$overall[2], 2)`    | `r round(forest.80.conf$byClass[1], 2)`    | `r round(forest.80.conf$byClass[2], 2)`    |
+| Regresion Lasso    | 3               | `r round(lasso.conf$overall[1], 2)`        | `r round(lasso.conf$overall[2], 2)`        | `r round(lasso.conf$byClass[1], 2)`        | `r round(lasso.conf$byClass[2], 2)`        |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
