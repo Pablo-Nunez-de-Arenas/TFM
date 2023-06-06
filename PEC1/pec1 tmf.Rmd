@@ -1,0 +1,325 @@
+---
+title: "TFM PEC 1: Desarrollo del trabajo. Fase 1"
+author: "Pablo Núñez de Arenas"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  html_document:
+    toc: true
+    toc-title: "Índice"
+    toc-depth: 5
+    citation_package: natbib
+    keep_tex: true
+    pandoc_args: ["--csl=nature.csl"]
+  pdf_document:
+    toc: yes
+    citation_package: natbib
+    keep_tex: true
+    pandoc_args: ["--csl=nature.csl"]
+bibliography: TFM.bib
+lang: es 
+---
+
+```{r setup, include=FALSE}
+# knitr options
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r libraries, include=FALSE}
+# Install packages
+# Load packages
+# ...
+
+library(knitr)
+library(ROSE)
+```
+
+```{r input, include=FALSE}
+# Input / Output variables
+# Tuning parameters
+# ...
+file1 <- "ckd-dataset-v2.csv"
+
+```
+
+### **Título**: 
+
+“Desarrollo de una aplicación web para la predicción de enfermedades renales crónicas, aplicando técnicas de aprendizaje automático sobre características fisiológicas de pacientes enfermos y sanos”.
+
+### **Palabras clave**: 
+
+Aprendizaje automático, Variables categóricas, Enfermedad renal crónica, Aplicación web, Shinydashboard.
+
+### **1. Contexto y Justificación del Trabajo:**
+
+El término enfermedad renal crónica (ERC) hace referencia al conjunto de trastornos que afectan a la estructura y función renal a lo largo del tiempo [@levey2012chronic]. Las ERC representan un problema de salud pública mundial que solo en los Estados Unidos afecta a más de veinte millones de personas [@webster2017chronic].  El tratamiento de la enfermedad varía en función de su causa y gravedad, pero es indispensable que se aborde desde sus primeras etapas ya que algunos tratamientos, sobre todo en estas fases, pueden prevenir su desarrollo [@levey2012chronic]. La problemática principal reside en que en su fase inicial la gente que padece ERC es asintomática o sufre de síntomas inespecíficos como letargo, picazón o pérdida de apetito, que derivan en diagnósticos tardíos [@webster2017chronic]. Cuando la enfermedad esta avanzada, la insuficiencia renal afecta a la mayoría de las funciones corporales produciendo, por ejemplo, acumulación de líquidos, hipertensión arterial o anemia. En estas ocasiones el único tratamiento posible es la diálisis y el trasplante de riñón [@romagnani2017chronic].
+
+Tanto la necesidad de encontrar una forma eficiente de diagnosticar la enfermedad en sus fases iniciales, como la de poder predecir el riesgo de cada persona de padecerla, apuntan al aprendizaje automático como una solución más que prometedora. Los algoritmos de aprendizaje automático pueden analizar grandes conjuntos de datos clínicos como: presiones arteriales, niveles de azúcar, etc. Y a partir de ellos, identificar patrones que puedan indicar la presencia o ausencia de ERC. Un buen modelo de clasificación combinado con el desarrollo de una aplicación web interactiva, puede resultar de gran utilidad para los médicos, que podrán detectar la enfermedad en sus fases iniciales, abordándola antes y de forma personalizada para cada paciente, lo que podría resultar en prolongar la vida de innumerables personas.
+
+### **2. Descripción general:**
+
+Se aplicarán distintas técnicas de aprendizaje automático sobre una base de datos con 28 variables categóricas además de la variable respuesta. Se determinará el modelo más preciso a la hora de diagnosticar ERC / no ERC y posteriormente se desarrollará una aplicación web interactiva en base al modelo seleccionado.
+
+### **3. Objetivos:**
+
+A. Objetico general:
+
+  1.	Crear una aplicación capaz de diagnosticar o descartar ERC utilizando únicamente algunas de las variables presentes en la base de datos.
+
+B. Objetivos específicos:
+
+  1.	Evaluar distintas técnicas de clasificación para determinar el mejor modelo predictivo.
+
+  2.	Optimizar el modelo seleccionado hasta lograr una precisión mínima del 85%.
+
+  3.	Encontrar las variables con mayor peso en el diagnóstico de la enfermedad y utilizarlas para crear un nuevo modelo que alcance como      mínimo una precisión del 75%.
+
+  4.	Desarrollar una aplicación web interactiva en base al modelo con menor número de variables.
+
+### **4. Enfoque y método a seguir:**
+
+En el campo de la salud, el aprendizaje automático se ha convertido en una herramienta útil para el diagnóstico temprano de enfermedades que puede ayudar a los médicos a tomar decisiones más precisas y eficientes. El `dataset` que utilizaremos fue obtenido de ["UCI Machine Learning Repository"](https://archive.ics.uci.edu/ml/datasets/Chronic_Kidney_Disease) [@Dua:2019]. Se trata de un conjunto de datos reales obtenidos durante dos meses en distintos hospitales de la India por el Dr. P. Soundarapandian.M.D. Fueron tomadas 200 mediciones de 29 variables como la edad, la presión sanguínea o los niveles de azucar en sangre, siendo la variable respuesta la ausencia o presencia de ERC. Mencionar que en el repositorio solo se mencionan 25 de las variables que aparecen realmente. A continuación se muestran un ejemplo de la base de datos original y se comprueban sus dimensiones. Destacar que el símbolo "â‰¥" es en realidad un símbolo ">".
+
+```{r, chunck1, echo=FALSE}
+# Leemos el archivo y borramos las filas vacias
+data <- read.csv(file1)
+data <- data[-1:-2,]
+
+knitr::kable(
+data[1:5, 1:8],
+caption ="Chronic kidney disease dataset:"
+)
+
+dim(data)
+```
+
+Debido a las características de la base de datos, se aplicará el enfoque de clasificación mediante aprendizaje supervisado. El aprendizaje supervisado es una técnica de aprendizaje automático en la que se entrena un modelo a partir de un conjunto de datos etiquetados. En este tipo de aprendizaje, el modelo se alimenta de ejemplos de datos de entrada y salida etiquetados, estos ejemplos son utilizados para aprender a predecir la salida correcta para nuevas entradas sin etiquetar [@lantz2019machine]. Existen varios algoritmos de aprendizaje supervisado pero los que mejor se ajustan al uso de variables categóricas son los “Suport Vector Machines” (SVM) y los “Model Trees” [@mythili2014novel]. Adicionalmente podemos probar alguno de los siguientes modelos.
+
+![fig 1. Algoritmos de aprendizaje supervisado (Lantz, 2019).](modelos supervisados.png){width=width height=height}
+
+Para la implementación de este tipo de algoritmos en general se siguen los siguientes pasos [@lantz2019machine]:
+
+  1.	Recopilar datos.
+  
+  2.	Explorar y preprocesar datos.
+  
+  3.	Construir y entrenar un modelo en los datos.
+  
+  4.	Evaluar el rendimiento del modelo.
+  
+  5.	Mejorar el rendimiento del modelo.
+  
+  6.	Evaluar el modelo mejorado.
+  
+#### Análisis exploratorio:
+
+De los 200 pacientes; 128 pertenecen a la categoría “cdk” (ERC en inglés) y 72 “nocdk".
+
+```{r, chunck2, echo=FALSE}
+# Conteo de clase
+table(data$class)
+```
+
+Esto puede ser un problema que lleve a un modelo subóptimo con un sesgo hacia la clase más común y con dificultades para predecir la menos común, es decir el modelo tenderá a clasificar como "cdk" más pacientes de los necesarios incurriendo en varios falsos positivos [@johnson2019survey]. Propongo solucionar este problema con la librería ["ROSE"](https://cran.r-project.org/web/packages/ROSE/ROSE.pdf) (Random Over-Sampling Examples) esta librería nos permitirá aplicar técnicas de sobremuestreo artificial para aumentar el número de observaciones de la clase minoritaria mejorando la precisión del modelo, aunque es importante tener en cuenta que la sobremuestra aleatoria puede generar observaciones sintéticas y, por lo tanto, debe aplicarse con precaución para evitar el sobreajuste.
+
+Sobre las variables explicativas todas ellas son categóricas, para su uso debemos convertirlas variables a numérica. La codificación de variables propuesta para el conjunto de datos es:
+
+| Variable | Nombre   | Codificación Inicial | Codificación Final |
+|:---:|:---:|:---:|:---:|
+| **Class** | class | cdk / notcdk | cdk / notcdk |
+| **Blood preassure** | bp.diastolic | 0 / 1 | 0 /1 |
+| **¿?** | bp.limit | 0 / 1 | 0 / 1 |
+| **Specific gravity** | sg | < 1.007<br>1.009 - 1.011<br>1.1015 - 1.017<br>1.019 - 1.021     <br>> 1.023 | 0<br>1<br>2<br>3<br>4 |
+| **Albumin** | al | < 0 <br>1 - 1 <br>2 – 2<br>3 - 3 <br>> 4 | 0<br>1<br>2<br>3<br>4 |
+| **Red blood cells** | rbc | 0 / 1 | 0 / 1 |
+| **Sugar** | su | < 0 <br>1 - 2 <br>2 – 2<br>3 - 4<br>4 - 4 <br>> 4 | 0<br>1<br>2<br>3<br>4<br>5 |
+| **Pus cell** | pc | 0 / 1 | 0 / 1 |
+| **Pus cell clumps** | pcc | 0 / 1 | 0 / 1 |
+| **Bacteria** | ba | 0 / 1 | 0 / 1 |
+| **Blood glucosa random** | bgr | < 112 <br>112 - 154 <br>154 - 196 <br>196 - 238 <br>238 - 280 <br>280 - 322 <br>322 – 364<br>364 – 406<br>406 – 448<br>> 448 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9 |
+| **Blood urea** | bu | < 48.1 <br>124.3 - 162.4 <br>162.4 - 200.5 <br>200.5 - 238.6 <br>238.6 - 276.7 <br>48.1 - 86.2  <br>86.2 - 124.3     <br>> 352.9 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7 |
+| **Sodium** | sod | < 118 <br>118 - 123 <br>123 - 128 <br>128 - 133 <br>133 - 138 <br>138 - 143 <br>143 - 148 <br>148 - 153   <br>> 158 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8 |
+| **Serum creatine** | sc | < 3.65 <br>13.1 - 16.25 <br>16.25 - 19.4   <br>3.65 - 6.8   <br>6.8 - 9.95 <br>9.95 - 13.1    <br>> 28.85 | 0<br>1<br>2<br>3<br>4<br>5<br>6 |
+| **Potassium** | Pot | < 7.31 <br>38.18 - 42.59  <br>7.31 - 11.72    <br>> 42.59 | 0<br>1<br>2<br>3 |
+| **Hemoglobin** | Hemo | < 6.1   <br>10 - 11.3 <br>11.3 - 12.6 <br>12.6 - 13.9 <br>13.9 - 15.2 <br>15.2 - 16.5 <br>6.1 - 7.4   <br>7.4 - 8.7    <br>8.7 - 10    <br>> 16.5 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9 |
+| **Packed cell volumen** | pcv | < 17.9 <br>17.9 - 21.8 <br>21.8 - 25.7 <br>25.7 - 29.6 <br>29.6 - 33.5 <br>33.5 - 37.4       <br>37.4 - 41.3 <br>41.3 - 45.2 <br>45.2 - 49.1    <br>> 49.1 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9 |
+| **Red blood cell volumen** | rbcc | < 2.69 <br>2.69 - 3.28 <br>3.28 - 3.87 <br>3.87 - 4.46 <br>4.46 - 5.05 <br>5.05 - 5.64  <br>5.64 - 6.23 <br>6.23 - 6.82   <br>> 7.41 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8 |
+| **White blood cell count** | wbcc | < 4980 <br>12120 - 14500 <br>14500 - 16880 <br>16880 - 19260 <br>19260 - 21640 <br>4980 - 7360   <br>7360 - 9740  <br>9740 - 12120     <br>> 24020 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8 |
+| **Hypertension** | htn | 0 / 1 | 0 / 1 |
+| **Diabetes melitus** | dm | 0 / 1 | 0 / 1 |
+| **Coronary artery disease** | cad | 0 / 1 | 0 / 1 |
+| **Appetite** | Appet | 0 / 1 | 0 / 1 |
+| **Pedal edema** | Pe | 0 / 1 | 0 / 1 |
+| **Anemia** | Ane | 0 / 1 | 0 / 1 |
+| **Glomerular Filtrarion Rate** | grf | p          <br>< 26.6175 <br>102.115 - 127.281 <br>127.281 - 152.446 <br>152.446 - 177.612 <br>177.612 - 202.778 <br>202.778 - 227.944 <br>26.6175 - 51.7832 <br>51.7832 - 76.949  <br>76.949 - 102.115     <br>> 227.944 | 0<br>1<br>5<br>6<br>7<br>8<br>9<br>2<br>3<br>4<br>10 |
+| **Phase of the disease** | stage | s1 <br>s2 <br>s3 <br>s4 <br>s5 | 0<br>1<br>2<br>3<br>4<br>5 |
+| **Age** | age | < 12 <br>12 - 20 <br>20 - 27 <br>27 - 35 <br>35 - 43 <br>43 - 51 <br>51 - 59 <br>59 - 66 <br>66 - 74 <br>> 74 | 0<br>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9 |
+
+El `dataset` queda de la siguiente manera:
+```{r, chunck3, echo=FALSE}
+# Leemos el archivo, borramos "affected" lineas sobrantes y reordenamos
+data <- data[-28]
+data <- cbind(data[5], data[-5])
+
+# Convertimos cada variable a factor y la volvemos a codificar si es necesario
+data <- lapply(data, factor)
+levels(data$sg) <- c(0, 1, 2, 3, 4)
+levels(data$al) <- c(0, 1, 2, 3, 4)
+levels(data$su) <- c(0, 1, 2, 3, 4, 5)
+levels(data$bgr) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+levels(data$bu) <- c(0, 3, 4, 5, 6, 1, 2, 7)
+levels(data$sod) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+levels(data$sc) <- c(0, 1, 2, 3, 4, 5, 6)
+levels(data$pot) <- c(0, 1, 2, 3)
+levels(data$hemo) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+levels(data$pcv) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+levels(data$rbcc) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+levels(data$wbcc) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8)
+levels(data$grf) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+levels(data$stage) <- c(0, 1, 2, 3, 4, 5)
+levels(data$age) <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+
+data <- as.data.frame(data)
+
+knitr::kable(
+data[1:5, ],
+caption ="Chronic kidney disease dataset:"
+)
+```
+
+Podemos acceder al resumen de cada variable, puesto que todas las variables son categóricas la única información relevante es el número de muestras pertenecientes a cada nivel de cada variable.
+
+```{r, chunck4, echo=FALSE}
+summary(data)
+```
+
+Sobre las variables categóricas hay algunas diferencias entre lo descrito en el repositorio y la realidad, destacan cuatro diferencias principales:
+
+  1.	La variable “bp” (blood pressure) debería ser una única variable         numérica que en la base de datos se divide en dos variables              categóricas “bp.diastolic” con niveles 0 y 1 y “bp.limit” con            niveles 0, 1 y 2. No existe información referente al significado de       estas variables.
+
+  2. Affected es básicamente la variable “class” (ckd / nockd) pero en codificación binomial, podemos usar tanto una como la otra, pero         debemos asegurarnos de no usar ambas a la vez.
+
+  3.	GRF hace referencia al grado de filtración glomerular. Según             Websteret al. Las guías internacionales definen una ERC cuando el        GRF es inferior a 60ml/min por 1.73 $m^2$. Sin embargo, en la base       de datos aparecen como ERC pacientes con filtraciones mayores a 60       ml y también pacientes sanos con filtraciones menores a 60. Destacar que está es la interpretación que le he dado a la variable puesto que no       aparece explicada en el repositorio.
+  
+```{r, chunck5, echo=TRUE}
+# Número de pacientes con GRF < 26 diagnosticados como ERC o sano
+table(data$class[data$grf==1])
+# Número de pacientes con GRF entre 26 y 51 diagnosticados como ERC o sano
+table(data$class[data$grf==2])
+# Número de pacientes con GRF entre 51 y 76 diagnosticados como ERC o sano
+table(data$class[data$grf==3])
+# Número de pacientes con GRF entre 177 y 202 diagnosticados como ERC o sano
+table(data$class[data$grf==8])
+```
+
+  4. Stage hace referencia a las fases de la enfermedad, según lo que he      encontrado en esta             [página](https://www.davita.com/education/kidney-disease/stages),             la variable está directamente ligada al GFR por lo que                   introducir ambas variables puede generarnos problemas de                 multicolinialidad. Además las fases de la enfermedad no coinciden con los niveles de GFR que se muestran en la página. Por ejemplo, en la fase 2 de la enfermedad el GFR oscila entre los 60 y 89 mL/min que correspondería a los niveles 3 y 4 de nuestra variable que van de 51 a 102 mL/min. Vemos como todos los pacientes se clasifican como fase 0 en este caso.
+  
+```{r, chunck6, echo=TRUE}
+# Fase de la enfermedad de los pacientes con un GRF entre 51 y 76
+table(data$stage[data$grf==3])
+# Fase de la enfermedad de los pacientes con un GRF entre 76 y 102
+table(data$stage[data$grf==4])
+
+```
+ 
+
+Puesto ninguna de las variables mencionadas anteriormente aparece oficialmente en el repositorio propongo no tenerlas en cuenta y eliminarlas. Así evitamos introducir variables que no están explicadas y variables altamente correlacionadas que pueden influir negativamente en la precisión del modelo.
+
+Los modelos que propongo utilizar son SVM, arboles de decisión y random forest ya que suelen ser muy efectivos en modelos con variables categóricas. Además, el uso de arboles de decisión nos permitirá calcular la importancia relativa de cada variable lo que puede sernos útil en el futuro a la hora de simplificar el modelo. También puede ser interesante probar con el algoritmo de vecinos cercanos (KNN) ya que por lo general es bastante preciso además de ser particularmente útil en conjuntos de datos de gran dimensionalidad donde no están claras las variables más importantes del modelo. Incluso su precisión es alta cuando el conjunto de datos está desequilibrado como en este caso asumiendo que no queramos introducir muestras sintéticas [@lantz2019machine].
+
+Por último, propongo un modelo de regresión binomial, este modelo destaca por ser fácilmente interpretable lo que nos permitirá identificar factores de riesgo y analizar el impacto de cada una de las variables en la respuesta [@wooff2004logistic]. Este modelo también nos ayudará a decidir con que variables quedarnos a la hora de crear un modelo reducido implementable en la aplicación web. Todas estas técnicas se evaluarán en el entorno RStudio. Una vez creado un modelo con todas las variables que tenga la precisión deseada se intentará crear un segundo modelo con menos variables el cuál será integrado en el desarrollo de la aplicación web empleando el paquete de Shiny de R.
+
+### **5. Planificación con hitos y temporización:**
+
+####  **A. Tareas:**
+  
+| **Descripción**                                                          | **Fecha de inicio**             | **Fecha de fin** |
+|:------------------------------------------------------------------------:|:-------------------------------:|:----------------:|
+| Definición del plan de  trabajo. PEC1.                                    | 1/mar/2023                      | 20/mar/2023      |
+| Recopilación y análisis  exploratorio de los datos.                       | 1/mar/2023                      | 5/mar/2023       |
+| Definición de los  modelos que será aplicados.                            | 5/mar/2023                      | 9/mar/2023       |
+| Desarrollo del plan  de trabajo.                                          | 9/mar/2023                      | 15/mar/2023      |
+| Entrega y retroalimentación del plan de trabajo.                          | 15/mar/2023                     | 20/mar/2023      |
+| **Desarrollo del trabajo. Fase 1. PEC2.**                                 | **21/mar/2023**                 | **24/abr/2023**  |
+| Exploración de las técnicas  y herramientas necesarias.                   | 21/mar/2023                     | 23/mar/2023      |
+| Entender el formato de  entrada de los datos que requiere cada modelo.    | 23/mar/2023                     | 26/mar/2023      |
+| Preprocesamiento de los datos si se requieren  cambios adicionales.       | 27/mar/2023                     | 27/mar/2023      |
+| Contrucción, entrenamiento validación y optimización de los modelos.      | 28/mar/2023                     | 11/abr/2023      |
+| Análisis de variables más importantes y desarrollo de un modelo reducido. | 11/abr/2023                     | 18/abr/2023      |
+| Documentación del trabajo en la memoria.                                  | 18/abr/2023                     | 21/abr/2023      |
+| Optimizar esquema y  presentación de la PEC 2.                            | 22/abr/2023                     | 22/abr/2023      |
+| Entrega y retralimentación de la fase 2.                                  | 22/abr/2023                     | 27/abr/2023      |
+| **Desarrollo del trabajo. Fase 2. PEC3.**                                | **27/abr/2023**                 | **29/may/2023**  |
+| Análisis de los resultados.                                               | 27/abr/2023                     | 30/abr/2023      |
+| Selección del modelo.                                                     | 30/abr/2023                     | 30/abr/2023      |
+| Aprendizaje de desarrollo  de aplicaciones empleando  Shiny.             | 1/may/2023                      | 7/may/2023       |
+| Definición del esquema  de la aplicación.                                 | 7/may/2023                      | 17/may/2023      |
+| Desarrollo de la aplicación web con Shiny.                               | 17/may/2023                     | 23/may/2023      |
+| Probar el funcionamiento  de la aplicación.                               | 23/may/2023                     | 25/may/2023      |
+| Documentación del trabajo  en la memoria.                                 | 25/may/2023                     | 27/may/2023      |
+| Optimizar esquema y entrega de la PEC 3.                                  | 27/may/2023                     | 29/may/2023      |
+| **Cierre de la memoria. PEC 4.**                                         | **30/may/2023**                 | **20/jun/2023**  |
+| Optimizar esquema y presentación de la memoria.                           | 30/may/2023                     | 10/jun/2023      |
+| Optimizar esquema y presentación del código fuente.                      | 30/may/2023                     | 10/jun/2023      |
+| Ensayo de la presentación.                                                | 10/jun/2023                     | 13/jun/2023      |
+| Elaboración de la  presentación.                                          | 13/jun/2023                     | 18/jun/2023      |
+| Entrega PEC 4.                                                            | 18/jun/2023                     | 20/jun/2023      |
+| **Defensa pública. PEC 5.**                                               | 3/jul/2023                      | 14/jul/2023      |
+| Repaso de la memoria.                                                     | 3 días antes de la presentación |                  |
+
+####  **B. Calendario:**
+
+![fig 2. Diagrama de Gantt PEC1 (https://www.canva.com/).](Grant PEC1.png){width=width height=height}  
+
+![fig 3. Diagrama de Gantt PEC 2 (https://www.canva.com/).](Grant PEC2.png){width=width height=height}  
+ 
+![fig 4. Diagrama de Gantt PEC 3 (https://www.canva.com/).](Grant PEC3.png){width=width height=height} 
+
+![fig 5. Diagrama de Gantt PEC 4 y 5 (https://www.canva.com/).](Grant PEC4-5.png){width=width height=height} 
+
+####  **C. Hitos:**
+
+| **Descripción**                         | **Fecha** |
+|:---------------------------------------:|:---------:|
+| Entrega del plan de trabajo.            | 15/3/2023 |
+| Entrega desarrollo del trabajo. Fase 1. | 27/4/2023 |
+| Entrega desarrollo del trabajo. Fase 2. | 29/5/2023 |
+| Entrega de la memoria.                  | 10/6/2023 |
+| Entrega de la presentación.             | 20/6/2023 |
+| Defensa pública                         | ¿?/7/2023 |
+
+####  **D. Análisis de riesgos:**
+
+| **Descripción del riesgo**                                      | **Severidad** | **Probabilidad** | **Mitigación**                                                                                                   |
+|:---------------------------------------------------------------:|:-------------:|:----------------:|:----------------------------------------------------------------------------------------------------------------:|
+|   Problemas con el<br>funcionamiento<br>de las librerías en R   |      Alta     |       Baja       |                        Búsqueda de librerias<br>adicionales y barajar <br>el uso de python                       |
+|             No poder crear alguno<br>de los modelos             |     Altas     |       Bajas      | Correcta codificación<br>de las variables <br>categóricas y verificaciñon<br>de las exigencias de cada<br>modelo |
+|    No alcanzar la precisión<br>mínima en el primer<br>modelo    |      Alta     |       Baja       |                         Equilibrar las variables<br>respuestas, optimizar los<br>modelos                         |
+|   No poder simplificar el<br>modelo usando menos <br>variables  |      Alta     |     Moderada     |     Selección basada en árboles /<br>Análisis de componentes <br>principales / Coeficientes de <br>regresión     |
+| El modelo reducido no <br>tiene la precisión <br>minima deseada |    Moderada   |     Moderada     |                       Investigar sobre todos los<br>factores para optimizar los<br>modelos.                      |
+| No poder desarrollas la<br>aplicación web en Shiny              |      Alta     |       Baja       |                          Buscar librerías alternativas<br>en R o programas alternativos                          |
+
+### **6. Resultados esperados:**    
+
+  **A. Plan de trabajo:**
+
+  Documento inicial en formato HTML/PDF obtenido a partir de `Rmarkdown` que contenga las pautas y tiempos estimados de ejecución de todas las tareas necesarias para el desarrollo del trabajo y cumplimiento de objetivos.
+
+  **B. Memoria:**
+
+  Documento en formato HTML/PDF obtenido a partir de `Rmarkdown` que detalle toda la investigación, desarrollo, resultados y conclusiones obtenidas a lo largo del trabajo de fin de máster, así como el código implementado.
+
+  **C. Producto:**
+
+  1. Link de acceso a la aplicación web desarrollada en Shiny para el diagnóstico de ERC introduciendo únicamente las variables más importantes para su diagnóstico.
+  
+  2. Acceso a un repositorio público que permita acceder al código desarrollado.
+  
+  **D. Presentación virtual:**
+
+  Presentación en formato PPT para exponer el trabajo realizado.
+
+### **7. Bibliografía:**
+
+
+
